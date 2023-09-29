@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -19,10 +20,10 @@ type SnippetModel struct {
 
 func (m *SnippetModel) Insert(title, content string, expires int) (int, error) {
 
-	queryStamp := `INSERT INTO snippets (title, content, created, expires)
+	stmt := `INSERT INTO snippets (title, content, created, expires)
 	VALUES(?, ?, UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? DAY))`
 
-	result, err := m.DB.Exec(queryStamp, title, content, expires)
+	result, err := m.DB.Exec(stmt, title, content, expires)
 	if err != nil {
 		return 0, err
 	}
@@ -36,10 +37,55 @@ func (m *SnippetModel) Insert(title, content string, expires int) (int, error) {
 }
 
 func (m *SnippetModel) Get(id int) (Snippet, error) {
-	return Snippet{}, nil
+	stmt := `SELECT * FROM snippets
+                   WHERE expires > UTC_TIMESTAMP() AND id = ?`
+	row := m.DB.QueryRow(stmt, id)
+
+	var s Snippet
+
+	err := row.Scan(&s.ID, &s.Title, &s.Content, &s.Created, &s.Expires)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Snippet{}, ErrNoRecord
+		}
+		return Snippet{}, err
+	}
+
+	return s, nil
 }
 
 // Latest method returns last 10 recently created snippets.
 func (m *SnippetModel) Latest() ([]Snippet, error) {
-	return nil, nil
+	stmt := `SELECT * FROM snippets
+                   WHERE expires > UTC_TIMESTAMP() ORDER BY id DESC LIMIT 10`
+
+	var ss []Snippet
+
+	rows, err := m.DB.Query(stmt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoRecord
+		}
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var s Snippet
+
+		err = rows.Scan(&s.ID, &s.Title, &s.Content, &s.Created, &s.Expires)
+
+		if err != nil {
+			return nil, err
+		}
+
+		ss = append(ss, s)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return ss, nil
 }
